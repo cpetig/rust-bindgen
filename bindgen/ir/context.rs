@@ -902,6 +902,31 @@ If you encounter an error missing from this list, please file an issue or a PR!"
         Ident::new(name.as_ref(), Span::call_site())
     }
 
+    pub(crate) fn wit_mangle<'a>(&self, name: &'a str) -> String {
+        let mut result = String::new();
+        let mut last_lower = false;
+        for c in name.chars() {
+            if c.is_ascii_alphanumeric() {
+                if c.is_ascii_uppercase() && last_lower {
+                    result.push('-');
+                }
+                result.push(c.to_ascii_lowercase());
+                last_lower = c.is_ascii_lowercase();
+            } else {
+                result.push('-');
+                last_lower = false;
+            }
+        }
+        result
+    }
+
+    pub(crate) fn wit_ident<S>(&self, name: S) -> String
+    where
+        S: AsRef<str>,
+    {
+        self.wit_mangle(name.as_ref())
+    }
+
     /// Iterate over all items that have been defined.
     pub(crate) fn items(&self) -> impl Iterator<Item = (ItemId, &Item)> {
         self.items.iter().enumerate().filter_map(|(index, item)| {

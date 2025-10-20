@@ -317,7 +317,7 @@ fn get_extra_clang_args(
 
 impl Builder {
     /// Generate the Rust bindings using the options built up thus far.
-    pub fn generate(mut self) -> Result<Bindings, BindgenError> {
+    pub fn generate(mut self) -> Result<String, BindgenError> {
         // Keep rust_features synced with rust_target
         self.options.rust_features = match self.options.rust_edition {
             Some(edition) => {
@@ -672,7 +672,8 @@ impl std::error::Error for BindgenError {}
 #[derive(Debug)]
 pub struct Bindings {
     options: BindgenOptions,
-    module: proc_macro2::TokenStream,
+    // module: proc_macro2::TokenStream,
+    string: String,
 }
 
 pub(crate) const HOST_TARGET: &str =
@@ -754,7 +755,7 @@ impl Bindings {
     pub(crate) fn generate(
         mut options: BindgenOptions,
         input_unsaved_files: &[clang::UnsavedFile],
-    ) -> Result<Bindings, BindgenError> {
+    ) -> Result<String, BindgenError> {
         ensure_libclang_is_loaded();
 
         #[cfg(feature = "runtime")]
@@ -927,7 +928,7 @@ impl Bindings {
         let (module, options) =
             codegen::codegen(context).map_err(BindgenError::Codegen)?;
 
-        Ok(Bindings { options, module })
+        Ok(module)
     }
 
     /// Write these bindings as source text to a file.
@@ -954,6 +955,8 @@ impl Bindings {
             )?;
         }
 
+        write!(writer, "interface test {{");
+
         for line in &self.options.raw_lines {
             writer.write_all(line.as_bytes())?;
             writer.write_all(NL.as_bytes())?;
@@ -963,17 +966,10 @@ impl Bindings {
             writer.write_all(NL.as_bytes())?;
         }
 
-        match self.format_tokens(&self.module) {
-            Ok(formatted_bindings) => {
-                writer.write_all(formatted_bindings.as_bytes())?;
-            }
-            Err(err) => {
-                eprintln!(
-                    "Failed to run rustfmt: {err} (non-fatal, continuing)"
-                );
-                writer.write_all(self.module.to_string().as_bytes())?;
-            }
-        }
+        write!(writer, "{}", self.string)?;
+
+        write!(writer, "}}\n")?;
+
         Ok(())
     }
 

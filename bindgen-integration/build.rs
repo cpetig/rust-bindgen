@@ -232,7 +232,7 @@ fn setup_macro_test() {
         .unwrap();
     let out_dep_file = out_path.join("test.d");
 
-    let bindings = Builder::default()
+    let _bindings = Builder::default()
         .formatter(Formatter::None)
         .enable_cxx_namespaces()
         .default_enum_style(EnumVariation::Rust {
@@ -261,9 +261,9 @@ fn setup_macro_test() {
         .expect("Unable to generate bindings");
 
     assert!(macros.read().unwrap().contains("TESTMACRO"));
-    bindings
-        .write_to_file(&out_rust_file)
-        .expect("Couldn't write bindings!");
+    // bindings
+    //     .write_to_file(&out_rust_file)
+    //     .expect("Couldn't write bindings!");
 
     let observed_deps =
         std::fs::read_to_string(out_dep_file).expect("Couldn't read depfile!");

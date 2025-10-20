@@ -55,7 +55,7 @@ use crate::ir::template::{
 use crate::ir::ty::{Type, TypeKind};
 use crate::ir::var::Var;
 
-use proc_macro2::{Ident, Span};
+use proc_macro2::{Ident, Span, TokenStream};
 use quote::{ToTokens, TokenStreamExt};
 
 use crate::{Entry, HashMap, HashSet};
@@ -289,6 +289,8 @@ struct CodegenResult<'a> {
     /// List of items to serialize. With optionally the argument for the wrap as
     /// variadic transformation to be applied.
     items_to_serialize: Vec<(ItemId, Option<WrapAsVariadic>)>,
+
+    string: String,
 }
 
 impl<'a> CodegenResult<'a> {
@@ -307,6 +309,7 @@ impl<'a> CodegenResult<'a> {
             vars_seen: Default::default(),
             overload_counters: Default::default(),
             items_to_serialize: Default::default(),
+            string: String::new(),
         }
     }
 
@@ -546,8 +549,8 @@ impl CodeGenerator for Item {
             ItemKind::Function(ref fun) => {
                 fun.codegen(ctx, result, self);
             }
-            ItemKind::Var(ref var) => {
-                var.codegen(ctx, result, self);
+            ItemKind::Var(ref _var) => {
+                // var.codegen(ctx, result, self);
             }
             ItemKind::Type(ref ty) => {
                 ty.codegen(ctx, result, self);
@@ -1164,6 +1167,14 @@ impl CodeGenerator for Type {
                 }
 
                 result.push(tokens);
+
+                // TODO: Check for TypeKind::Comp() and emit a struct
+                // instead of the typedef
+                result.string.push_str(&format!(
+                    " type {} = {};\n",
+                    ctx.wit_ident(self.name().unwrap()),
+                    wit_type(ctx, inner),
+                ));
             }
             TypeKind::Enum(ref ei) => ei.codegen(ctx, result, item),
             TypeKind::ObjCId | TypeKind::ObjCSel => {
@@ -2086,6 +2097,83 @@ impl<'a> FieldCodegen<'a> for Bitfield {
     }
 }
 
+fn wit_type(ctx: &BindgenContext, tp: crate::ir::context::TypeId) -> String {
+    let field_item = tp.into_resolver().through_type_refs().resolve(ctx);
+    let field_ty = field_item.expect_type();
+    match field_ty.kind() {
+        TypeKind::Void => "void".to_string(),
+        TypeKind::NullPtr => todo!(),
+        TypeKind::Comp(comp_info) => format!("{comp_info:?}"),
+        TypeKind::Opaque => todo!(),
+        TypeKind::Int(int_kind) => match int_kind {
+            IntKind::Bool => "bool".to_string(),
+            IntKind::I8 => "s8".to_string(),
+            IntKind::U8 => "u8".to_string(),
+            IntKind::I16 => "s16".to_string(),
+            IntKind::U16 => "u16".to_string(),
+            IntKind::I32 => "s32".to_string(),
+            IntKind::U32 => "u32".to_string(),
+            IntKind::I64 => "s64".to_string(),
+            IntKind::U64 => "u64".to_string(),
+            IntKind::I128 => "s128".to_string(),
+            IntKind::U128 => "u128".to_string(),
+            IntKind::SChar => "s8".to_string(),
+            IntKind::UChar => "u8".to_string(),
+            IntKind::WChar => "char".to_string(),
+            IntKind::Char { is_signed } => {
+                if *is_signed {
+                    "s8".to_string()
+                } else {
+                    "u8".to_string()
+                }
+            }
+            IntKind::Short => "s16".to_string(),
+            IntKind::UShort => "u16".to_string(),
+            IntKind::Int => "s32".to_string(),
+            IntKind::UInt => "u32".to_string(),
+            IntKind::Long => "s64".to_string(),
+            IntKind::ULong => "u64".to_string(),
+            IntKind::LongLong => "s64".to_string(),
+            IntKind::ULongLong => "u64".to_string(),
+            IntKind::Char16 => todo!(),
+            IntKind::Custom { name, is_signed } => todo!(),
+        },
+        TypeKind::Float(float_kind) => match float_kind {
+            crate::ir::ty::FloatKind::Float => "f32".to_string(),
+            crate::ir::ty::FloatKind::Double => "f64".to_string(),
+            crate::ir::ty::FloatKind::Float16 => todo!(),
+            crate::ir::ty::FloatKind::LongDouble => todo!(),
+            crate::ir::ty::FloatKind::Float128 => todo!(),
+        },
+        TypeKind::Complex(float_kind) => todo!(),
+        TypeKind::Alias(type_id) => {
+            let t2 = tp.into_resolver().through_type_refs().resolve(ctx);
+            let nm = t2.expect_type().name().unwrap();
+            ctx.wit_ident(nm)
+        }
+        TypeKind::TemplateAlias(type_id, type_ids) => todo!(),
+        TypeKind::Vector(type_id, _) => todo!(),
+        TypeKind::Array(type_id, size) => {
+            format!("list<{}, {size}>", wit_type(ctx, *type_id))
+        }
+        TypeKind::Function(function_sig) => todo!(),
+        TypeKind::Enum(_) => todo!(),
+        TypeKind::Pointer(type_id) => {
+            // stand in
+            format!("pointer<{}>", wit_type(ctx, *type_id))
+        }
+        TypeKind::BlockPointer(type_id) => todo!(),
+        TypeKind::Reference(type_id) => todo!(),
+        TypeKind::TemplateInstantiation(template_instantiation) => todo!(),
+        TypeKind::UnresolvedTypeRef(_, cursor, item_id) => todo!(),
+        TypeKind::ResolvedTypeRef(type_id) => todo!(),
+        TypeKind::TypeParam => todo!(),
+        TypeKind::ObjCInterface(obj_cinterface) => todo!(),
+        TypeKind::ObjCId => todo!(),
+        TypeKind::ObjCSel => todo!(),
+    }
+}
+
 impl CodeGenerator for CompInfo {
     type Extra = Item;
     type Return = ();
@@ -2110,7 +2198,7 @@ impl CodeGenerator for CompInfo {
         let mut packed = self.is_packed(ctx, layout.as_ref());
 
         let canonical_name = item.canonical_name(ctx);
-        let canonical_ident = ctx.rust_ident(&canonical_name);
+        let canonical_ident = ctx.wit_ident(&canonical_name);
 
         // Generate the vtable from the method list if appropriate.
         //
@@ -2126,6 +2214,7 @@ impl CodeGenerator for CompInfo {
         // the parent too.
         let is_opaque = item.is_opaque(ctx, &());
         let mut fields = vec![];
+        let mut fields2 = String::new();
         let visibility = item
             .annotations()
             .visibility_kind()
@@ -2223,6 +2312,20 @@ impl CodeGenerator for CompInfo {
                     &mut methods,
                     (),
                 );
+                match field {
+                    Field::DataMember(ref data) => {
+                        if let Some(name) = data.name() {
+                            fields2.push_str(&format!(
+                                "{}: {},\n",
+                                ctx.wit_ident(name),
+                                wit_type(ctx, data.ty())
+                            ));
+                        }
+                    }
+                    Field::Bitfields(ref unit) => {
+                        todo!();
+                    }
+                }
             }
             // Check whether an explicit padding field is needed
             // at the end.
@@ -2540,12 +2643,15 @@ impl CodeGenerator for CompInfo {
             }
         };
 
-        tokens.append_all(quote! {
-            #generics {
-                #( #fields )*
-            }
-        });
-        result.push(tokens);
+        // tokens.append_all(quote! {
+        //     #generics {
+        //         #( #fields )*
+        //     }
+        // });
+        // result.push(tokens);
+        result.string.push_str(&format!(
+            "struct {canonical_ident} {{\n {fields2}\n}}\n",
+        ));
 
         // Generate the inner types and all that stuff.
         //
@@ -2745,13 +2851,14 @@ impl CodeGenerator for CompInfo {
         }
 
         if needs_flexarray_impl {
-            result.push(self.generate_flexarray(
-                ctx,
-                &canonical_ident,
-                flex_inner_ty.as_ref(),
-                &generic_param_names,
-                &impl_generics_labels,
-            ));
+            // result.push(self.generate_flexarray(
+            //     ctx,
+            //     &canonical_ident,
+            //     flex_inner_ty.as_ref(),
+            //     &generic_param_names,
+            //     &impl_generics_labels,
+            // ));
+            todo!();
         }
 
         if needs_default_impl {
@@ -5155,7 +5262,7 @@ impl CodeGenerator for ObjCInterface {
 
 pub(crate) fn codegen(
     context: BindgenContext,
-) -> Result<(proc_macro2::TokenStream, BindgenOptions), CodegenError> {
+) -> Result<(String, BindgenOptions), CodegenError> {
     context.gen(|context| {
         let _t = context.timer("codegen");
         let counter = Cell::new(0);
@@ -5206,10 +5313,7 @@ pub(crate) fn codegen(
 
         utils::serialize_items(&result, context)?;
 
-        Ok(postprocessing::postprocessing(
-            result.items,
-            context.options(),
-        ))
+        Ok(result.string)
     })
 }
 
